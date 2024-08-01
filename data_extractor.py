@@ -10,13 +10,17 @@ from config import Config
 class DataExtractor:
   # Initialise the class with the Prometheus URL and the output directory
   def __init__(self):
-    # Initialiase the Prometheus URL from config
+    # Initialiase the Prometheus URL, Grafana URL and Token from config
     self.prometheusUrl = Config.PROMETHEUS_URL
     self.grafanaUrl = Config.GRAFANA_URL
+    self.token = Config.PROMETHEUS_TOKEN
 
   # function to fetch the prometheus data
   def fetchPrometheusData(self, query):
-    response = requests.get(f"{self.prometheusUrl}/v1/query", params={"query":query})
+    headers = {
+      "Authorization": f"Bearer {self.token}"
+    }
+    response = requests.get(f"{self.prometheusUrl}/v1/query", params={"query":query}, headers=headers)
     response.raise_for_status()
     return response.json()["data"]["result"]
   
@@ -26,39 +30,59 @@ class DataExtractor:
     metrics = {}
 
     # Fetching Uptime of api application (in Hours/Days/Month/Years)
-    uptimeQuery = f'avg_over_time({application}_uptime[1h])'
-
+    uptimeQuery = (
+            'process_uptime_seconds{container="driving-license-api", endpoint="8080", instance="10.128.2.92:8080", '
+            'job="driving-license-api", namespace="info-mediator-uat", pod="driving-license-api-87bf69c7-mwwr6", '
+            'prometheus="openshift-user-workload-monitoring/user-workload", service="driving-license-api"}'
+        )
     # Fetching Uptime result
     uptimeResult = self.fetchPrometheusData(uptimeQuery)
+    # Checking if uptime data is available and extracting it if available
+    if uptimeResult:
+      # Fetching how long application has been running
+      uptimeSeconds = float(uptimeResult[0]["value"][1])
+      # Extracting Uptime in hours
+      metrics["uptime_hours"] = uptimeSeconds / 3600 # converts seconds to hours
+    else:
+      metrics["uptime_hours"] = "N/A"
 
-    # Extracting Uptime in hours
-    metrics["uptime_hours"] = uptimeResult[0]["value"][1]
-
-    # Fetching Start Time of Application
-    startTimeQuery = f'{application}_start_time'
-
-    # Fetching Start Time result
-    startTimeResult = self.fetchPrometheusData(startTimeQuery)
-
-    # Extracting Start Time
-    metrics["start_time"] = datetime.fromtimestamp(float(startTimeResult[0]["value"][1])).strftime('%d-%m-%Y %H:%M:%S')
+    # Start time
+    if uptimeResult:
+      # Reseting uptimeSeconds
+      uptimeSeconds = float(uptimeResult[0]["value"][1])
+      startTime = datetime.now() - timedelta(seconds=uptimeSeconds)
+      metrics["start_time"] = startTime.strptime('%Y-%m-%d %H:%M:%S')
+    else:
+      metrics["start_time"] = "N/A"
 
     # Fetching Heap Used Percentage
-    heapUsedQuery = f'{application}_jvm_memory_used{{area="heap"}}'
-
+    heapUsedQuery = {
+      'sum(jvm_memory_used_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="heap"}) * 100 '
+      '/ sum(jvm_memory_max_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="heap"})'
+    }
     # Fetching Heap Used Percentage result
     heapUsedResult = self.fetchPrometheusData(heapUsedQuery)
+    # Checking if heap used data is available and extracting it if available
+    if heapUsedResult:
+     # Extracting Heap Used Percentage
+     heapUsedPercentage = float(heapUsedResult[0]["value"][1])
+     metrics["heap_used_percentage"] = heapUsedPercentage
+    else:
+      metrics["heap_used_percentage"] = "N/A"
 
-    # Extracting Heap Used Percentage
-    metrics["heap_used"] = heapUsedResult[0]["value"][1]
-
-    # Fetching Non Heap Used (Percentage)
-    nonHeapUsedQuery = f'{application}_jvm_memory_used{{area="nonheap"}}'
-
+    # Fetching Non Heap Used (Bytes)
+    nonHeapUsedQuery = {
+      'sum(jvm_memory_used_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="nonheap"}) * 100 '
+      '/ sum(jvm_memory_max_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="nonheap"})'
+    }
     # Fetching Non Heap Used Result
-    nonHeapUsedQueryResult = self.fetchPrometheusData(nonHeapUsedQuery)
-
-    # Extracting Non Heap Used Percentage
-    metrics["non_heap_used"] = nonHeapUsedQueryResult[0]["value"][1]
+    nonHeapUsedResult = self.fetchPrometheusData(nonHeapUsedQuery)
+    # Checking if non heap used data is available and extracting it if available
+    if nonHeapUsedResult:
+      nonheapUsedPercentage = float(nonHeapUsedResult[0]["value"][1])
+      # Extracting Non Heap Used (Bytes)
+      metrics["non_heap_used_percentage"] = nonheapUsedPercentage
+    else:
+      metrics["non_heap_used_percentage"] = "N/A"
 
     return metrics
