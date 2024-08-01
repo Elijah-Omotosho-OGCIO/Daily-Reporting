@@ -6,7 +6,3 @@ class Config:
 
     # Applications to monitor and their respective dashboards
     APPLICATIONS = ["birth-api","driving-license-api"]
-
-    # Output Directories
-    OUTPUT_DIR = 'outputs/'
-    TEMPLATE_DIR = 'templates/'

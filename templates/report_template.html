@@ -1,17 +1,31 @@
+<!-- templates/report_template.html -->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>Daily Stats Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Daily Stats Report - {{ date }}</h1>
-    <h2>Daily Active Users</h2>
-    <p>{{ daily_active_users }}</p>
-    <h2>Average Session Length</h2>
-    <p>{{ average_session_length }}</p>
-    <h2>Session Frequency</h2>
-    <p>{{ session_frequency }}</p>
-    <h2>Retention Rate</h2>
-    <p>{{ retention_rate }}</p>
+    <div class="section">
+        <div class="section-title">Quick Facts</div>
+        <p>Application: {{ application }}</p>
+        <p>Uptime (in Hours): {{ uptime_hours }}</p>
+        <p>Start Time: {{ start_time }}</p>
+        <p>Heap Used (Percentage): {{ heap_used }}%</p>
+        <p>Non Heap Used (Percentage): {{ non_heap_used }}%</p>
+    </div>
+    <!-- Add more sections for I/O Overview, JVM Memory, etc. -->
 </body>
 </html>
