@@ -1,98 +1,88 @@
 # Import the necessary libraries for interacting with Prometheus and handling data
 from datetime import datetime, timedelta
-
-# Import the pandas library for data manipulation and analysis
-import pandas as pd
+# Import the requestd library to communicate with apis in the cluster
 import requests
-
-# Import the configuration settings from the config.py file
-import config
+# Import the Config class from the config.py file
+from config import Config
 
 
 # Define a class to retrieve data from Prometheus
 class DataExtractor:
-  # Initialize the class with the Prometheus URL and the output directory
+  # Initialise the class with the Prometheus URL and the output directory
   def __init__(self):
-    # Initialiase the Prometheus URL from config
-    self.prometheus_url = config.PROMETHEUS_URL
+    # Initialiase the Prometheus URL, Grafana URL and Token from config
+    self.prometheusUrl = Config.PROMETHEUS_URL
+    self.grafanaUrl = Config.GRAFANA_URL
+    self.token = Config.PROMETHEUS_TOKEN
 
-  # Creating a func to get the data from Prometheus
-  def fetchData(self, startTime, endTime, query):
-    """
-    Fetch data from Prometheus betweem specified start and end time using a query.
-    """
-    
-    # Convert dates to timeStamps for Prometheus sockets
-    startTimestamp = int(startTime.timestamp())
-    endTimestamp = int(endTime.timestamp())
+  # function to fetch the prometheus data
+  def fetchPrometheusData(self, query):
+    headers = {
+      "Authorization": f"Bearer {self.token}"
+    }
+    response = requests.get(f"{self.prometheusUrl}/v1/query", params={"query":query}, headers=headers)
+    response.raise_for_status()
+    return response.json()["data"]["result"]
+  
+  # function to get metrics from Grafana
+  def getMetrics(self, startDate, endDate, application):
+    # Initalisining metrics collection
+    metrics = {}
 
-    # Requesting data from Prometheus Operator
-    # Send a GET request to the Prometheus API endpoint for querying data over a range
-    response = requests.get(
-        f"{self.prometheus_url}/api/v1/query_range",
-        params={
+    # Fetching Uptime of api application (in Hours/Days/Month/Years)
+    uptimeQuery = (
+            'process_uptime_seconds{container="driving-license-api", endpoint="8080", instance="10.128.2.92:8080", '
+            'job="driving-license-api", namespace="info-mediator-uat", pod="driving-license-api-87bf69c7-mwwr6", '
+            'prometheus="openshift-user-workload-monitoring/user-workload", service="driving-license-api"}'
+        )
+    # Fetching Uptime result
+    uptimeResult = self.fetchPrometheusData(uptimeQuery)
+    # Checking if uptime data is available and extracting it if available
+    if uptimeResult:
+      # Fetching how long application has been running
+      uptimeSeconds = float(uptimeResult[0]["value"][1])
+      # Extracting Uptime in hours
+      metrics["uptime_hours"] = uptimeSeconds / 3600 # converts seconds to hours
+    else:
+      metrics["uptime_hours"] = "N/A"
 
-            # Specify the Prometheus query to be executed
-            "query": query,
+    # Start time
+    if uptimeResult:
+      # Reseting uptimeSeconds
+      uptimeSeconds = float(uptimeResult[0]["value"][1])
+      startTime = datetime.now() - timedelta(seconds=uptimeSeconds)
+      metrics["start_time"] = startTime.strptime('%Y-%m-%d %H:%M:%S')
+    else:
+      metrics["start_time"] = "N/A"
 
-            # Set the start time of the query range in Unix timestamp format
-            "start": startTimestamp,
+    # Fetching Heap Used Percentage
+    heapUsedQuery = {
+      'sum(jvm_memory_used_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="heap"}) * 100 '
+      '/ sum(jvm_memory_max_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="heap"})'
+    }
+    # Fetching Heap Used Percentage result
+    heapUsedResult = self.fetchPrometheusData(heapUsedQuery)
+    # Checking if heap used data is available and extracting it if available
+    if heapUsedResult:
+     # Extracting Heap Used Percentage
+     heapUsedPercentage = float(heapUsedResult[0]["value"][1])
+     metrics["heap_used_percentage"] = heapUsedPercentage
+    else:
+      metrics["heap_used_percentage"] = "N/A"
 
-            # Set the end time of the query range in Unix timestamp format
-            "end": endTimestamp,
+    # Fetching Non Heap Used (Bytes)
+    nonHeapUsedQuery = {
+      'sum(jvm_memory_used_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="nonheap"}) * 100 '
+      '/ sum(jvm_memory_max_bytes{container="driving-license-api", instance="10.128.2.92:8080", area="nonheap"})'
+    }
+    # Fetching Non Heap Used Result
+    nonHeapUsedResult = self.fetchPrometheusData(nonHeapUsedQuery)
+    # Checking if non heap used data is available and extracting it if available
+    if nonHeapUsedResult:
+      nonheapUsedPercentage = float(nonHeapUsedResult[0]["value"][1])
+      # Extracting Non Heap Used (Bytes)
+      metrics["non_heap_used_percentage"] = nonheapUsedPercentage
+    else:
+      metrics["non_heap_used_percentage"] = "N/A"
 
-            # Define the sampling interval for the data retrieval (1 second in this case)
-            "step": "1s"
-        })
-
-    """
-    Process response and change it into a DataFrame = 'df' using pandas = 'pd'
-    """
-    # Check if the response status code is OK (200)
-    if response.status_code != 200:
-      raise Exception(f"Error fetching data from Prometheus: {response.status_code} - {response.text}")
-
-    # Attempt to parse the response as JSON
-    try:
-      # Extracting the result array from the JSON response
-      result = response.json()['data']['result']
-    except ValueError as e:
-      raise Exception(f"Error decoding JSON response: {e}")
-
-    # Initializing an empty list to store the processed data
-    data = []
-
-    # Iterating through each metric in the result array
-    for metric in result:
-
-      # Iterating through each data point for the current metric
-      for value in metric['values']:
-        # Creating a dictionary with timestamp, value, and metric labels, appending to the data list
-        data.append({
-            'timestamp': value[0],
-            'value': float(value[1]),
-            **metric['metric']
-        })
-
-    # Creating a Pandas DataFrame from the data list
-    return pd.DataFrame(data)
-
-
-if __name__ == "__main__":
-  # Example usage of Data Extractor
-  extractor = DataExtractor()
-
-  # Get yesterday's date
-  startDate = datetime.now() - timedelta(days=1)
-
-  # Get today's date
-  endDate = datetime.now()
-
-  # A Prometheus query to sum the rate of HTTP requests over the last minute, grouped by job
-  query = 'sum(rate(http_requests_total[1m])) by (job)'
-
-  # Call the fetchData method to get the data
-  df = extractor.fetchData(startDate, endDate, query)
-
-  # Print the first 5 rows of the DataFrame
-  print(df.head())
+    return metrics
